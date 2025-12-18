@@ -1,3 +1,6 @@
+import React, { useState, useEffect } from 'react';
+import { Dumbbell, Users, TrendingUp, Plus, X, Calendar, Award, LogOut, Shield, Lock } from 'lucide-react';
+
 const { useState, useEffect } = React;
 const { Dumbbell, Users, TrendingUp, Plus, X, Calendar, Award, LogOut, Shield, Lock } = lucide;
 
