@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Dumbbell, Users, TrendingUp, Plus, X, Calendar, Award, LogOut, Shield, Lock, BarChart3 } from 'lucide-react';
+import { Dumbbell, Users, TrendingUp, Plus, X, Calendar, Award, LogOut, Shield, Lock } from 'lucide-react';
 
 export default function GymTracker() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -23,7 +23,6 @@ export default function GymTracker() {
   const [newWorkout, setNewWorkout] = useState({
     member: '',
     exercise: '',
-    customExercise: '',
     sets: '',
     reps: '',
     weight: '',
@@ -33,8 +32,7 @@ export default function GymTracker() {
   const exercises = [
     'Bench Press', 'Squat', 'Deadlift', 'Overhead Press', 
     'Pull-ups', 'Rows', 'Bicep Curls', 'Tricep Dips',
-    'Leg Press', 'Shoulder Press', 'Lateral Raises', 'Lunges',
-    'Other (Custom)'
+    'Leg Press', 'Shoulder Press', 'Lateral Raises', 'Lunges'
   ];
 
   useEffect(() => {
@@ -170,23 +168,14 @@ export default function GymTracker() {
   };
 
   const addWorkout = async () => {
-    const finalExercise = newWorkout.exercise === 'Other (Custom)' 
-      ? newWorkout.customExercise 
-      : newWorkout.exercise;
-
-    if (finalExercise && newWorkout.sets && newWorkout.reps) {
-      const updatedWorkouts = [...workouts, { 
-        ...newWorkout, 
-        exercise: finalExercise,
-        id: Date.now() 
-      }];
+    if (newWorkout.exercise && newWorkout.sets && newWorkout.reps) {
+      const updatedWorkouts = [...workouts, { ...newWorkout, id: Date.now() }];
       setWorkouts(updatedWorkouts);
       await saveWorkouts(updatedWorkouts);
       
       setNewWorkout({
         member: currentUser.username,
         exercise: '',
-        customExercise: '',
         sets: '',
         reps: '',
         weight: '',
@@ -216,44 +205,6 @@ export default function GymTracker() {
     return { totalWorkouts, totalSets, memberWorkouts };
   };
 
-  const getPersonalStats = () => {
-    const myWorkouts = workouts.filter(w => w.member === currentUser.username);
-    
-    // Group by exercise
-    const exerciseStats = {};
-    myWorkouts.forEach(w => {
-      if (!exerciseStats[w.exercise]) {
-        exerciseStats[w.exercise] = [];
-      }
-      exerciseStats[w.exercise].push({
-        weight: parseFloat(w.weight) || 0,
-        date: w.date,
-        sets: parseInt(w.sets) || 0,
-        reps: parseInt(w.reps) || 0
-      });
-    });
-
-    // Calculate PRs and improvements
-    const stats = Object.keys(exerciseStats).map(exercise => {
-      const sessions = exerciseStats[exercise].sort((a, b) => new Date(a.date) - new Date(b.date));
-      const maxWeight = Math.max(...sessions.map(s => s.weight));
-      const firstWeight = sessions[0]?.weight || 0;
-      const lastWeight = sessions[sessions.length - 1]?.weight || 0;
-      const improvement = firstWeight > 0 ? ((lastWeight - firstWeight) / firstWeight * 100) : 0;
-      
-      return {
-        exercise,
-        personalRecord: maxWeight,
-        sessions: sessions.length,
-        improvement: improvement.toFixed(1),
-        lastWeight: lastWeight,
-        trend: lastWeight > firstWeight ? 'up' : lastWeight < firstWeight ? 'down' : 'stable'
-      };
-    }).sort((a, b) => b.sessions - a.sessions);
-
-    return stats;
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white flex items-center justify-center">
@@ -268,7 +219,6 @@ export default function GymTracker() {
   const stats = getStats();
   const recentWorkouts = [...workouts].reverse().slice(0, 10);
   const members = ['Ethan', 'Biensy', 'Brandon'];
-  const personalStats = isLoggedIn ? getPersonalStats() : [];
 
   if (!isLoggedIn) {
     return (
@@ -389,17 +339,6 @@ export default function GymTracker() {
             Dashboard
           </button>
           <button
-            onClick={() => setView('mystats')}
-            className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${
-              view === 'mystats'
-                ? 'bg-purple-600 shadow-lg shadow-purple-500/50'
-                : 'bg-white/10 hover:bg-white/20'
-            }`}
-          >
-            <BarChart3 className="w-5 h-5" />
-            My Stats
-          </button>
-          <button
             onClick={() => setView('crew')}
             className={`flex items-center gap-2 px-6 py-3 rounded-lg font-semibold transition-all ${
               view === 'crew'
@@ -472,57 +411,6 @@ export default function GymTracker() {
                           <X className="w-5 h-5" />
                         </button>
                       )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {view === 'mystats' && (
-          <div className="space-y-6">
-            <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-6">
-              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
-                <BarChart3 className="w-6 h-6 text-purple-400" />
-                My Progress & Personal Records
-              </h2>
-              {personalStats.length === 0 ? (
-                <p className="text-gray-400 text-center py-8">No workout data yet. Start logging workouts to see your stats!</p>
-              ) : (
-                <div className="space-y-4">
-                  {personalStats.map((stat) => (
-                    <div
-                      key={stat.exercise}
-                      className="bg-black/30 border border-white/10 rounded-lg p-5 hover:bg-black/40 transition-all"
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div>
-                          <h3 className="text-xl font-bold text-purple-300 mb-1">{stat.exercise}</h3>
-                          <p className="text-sm text-gray-400">{stat.sessions} sessions logged</p>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-2xl font-bold text-pink-400">{stat.personalRecord}kg</div>
-                          <p className="text-xs text-gray-400">Personal Record</p>
-                        </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/10">
-                        <div>
-                          <p className="text-xs text-gray-400 mb-1">Current Weight</p>
-                          <p className="text-lg font-semibold text-blue-300">{stat.lastWeight}kg</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-400 mb-1">Improvement</p>
-                          <p className={`text-lg font-semibold ${
-                            stat.trend === 'up' ? 'text-green-400' : 
-                            stat.trend === 'down' ? 'text-red-400' : 
-                            'text-gray-400'
-                          }`}>
-                            {stat.trend === 'up' ? '↑' : stat.trend === 'down' ? '↓' : '→'} {stat.improvement}%
-                          </p>
-                        </div>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -691,21 +579,6 @@ export default function GymTracker() {
                   {exercises.map(ex => <option key={ex} value={ex}>{ex}</option>)}
                 </select>
               </div>
-              
-              {newWorkout.exercise === 'Other (Custom)' && (
-                <div>
-                  <label className="block text-sm font-semibold mb-2 text-gray-300">Custom Exercise Name</label>
-                  <input
-                    type="text"
-                    value={newWorkout.customExercise}
-                    onChange={(e) => setNewWorkout({ ...newWorkout, customExercise: e.target.value })}
-                    className="w-full bg-black/30 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
-                    placeholder="Enter exercise name"
-                    required
-                  />
-                </div>
-              )}
-
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-semibold mb-2 text-gray-300">Sets</label>
