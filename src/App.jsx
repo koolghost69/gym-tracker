@@ -1018,9 +1018,6 @@ export default function GymTracker() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
   {showChangePassword && (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -1343,5 +1340,8 @@ export default function GymTracker() {
           </button>
         </div>
       </div>
+      </div>
+      )}
     </div>
-  )}
+  );
+}
