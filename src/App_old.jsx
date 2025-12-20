@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Dumbbell, Users, TrendingUp, Plus, X, Calendar, Award, LogOut, Shield, Lock, BarChart3, Target, Camera } from 'lucide-react';
+import { Dumbbell, Users, TrendingUp, Plus, X, Calendar, Award, LogOut, Shield, Lock, BarChart3, Target, Camera, RefreshCw, UserPlus, UserMinus } from 'lucide-react';
 
 export default function GymTracker() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -17,6 +17,11 @@ export default function GymTracker() {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [showAddPhoto, setShowAddPhoto] = useState(false);
+
+  const [adminAddUser, setAdminAddUser] = useState({ username: '', password: '', isAdmin: false });
+  const [adminReset, setAdminReset] = useState({ userKey: '', newPassword: '' });
+  const [adminNotice, setAdminNotice] = useState('');
+
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
     newPassword: '',
@@ -28,11 +33,11 @@ export default function GymTracker() {
     member: '',
     exercise: '',
     customExercise: '',
+    customMuscles: [],
     sets: '',
     reps: '',
     weight: '',
-    date: getLocalDateString(),
-    muscles: []
+    date: new Date().toISOString().split('T')[0]
   });
   const [newGoal, setNewGoal] = useState({
     exercise: '',
@@ -44,14 +49,9 @@ export default function GymTracker() {
   const [newPhoto, setNewPhoto] = useState({
     photoData: '',
     description: '',
-    date: getLocalDateString(),
+    date: new Date().toISOString().split('T')[0],
     member: ''
   });
-
-  // Admin user management state
-  const [adminUserForm, setAdminUserForm] = useState({ username: '', password: '', isAdmin: false });
-  const [resetUserForm, setResetUserForm] = useState({ username: '', password: '' });
-  const [adminMessage, setAdminMessage] = useState('');
 
   const exercises = [
     'Bench Press', 'Squat', 'Deadlift', 'Overhead Press', 
@@ -75,13 +75,8 @@ export default function GymTracker() {
     'Lunges': ['Legs', 'Glutes']
   };
 
-  // List of available muscle groups for custom exercises.
-  const availableMuscleGroups = ['Chest','Back','Shoulders','Biceps','Triceps','Legs','Glutes'];
+  const muscleGroupOptions = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Legs', 'Glutes'];
 
-  // Helper to get a YYYY-MM-DD string in the user's local timezone.
-  const getLocalDateString = () => {
-    return new Date().toLocaleDateString('en-CA');
-  };
   useEffect(() => {
     loadData();
   }, []);
@@ -99,8 +94,7 @@ export default function GymTracker() {
         const defaultUsers = {
           ethan: { username: 'Ethan', password: 'ethan123', isAdmin: true },
           biensy: { username: 'Biensy', password: 'biensy123', isAdmin: false },
-          brandon: { username: 'Brandon', password: 'brandon123', isAdmin: false },
-          chat: { username: 'Chat', password: 'gpt123', isAdmin: true }
+          brandon: { username: 'Brandon', password: 'brandon123', isAdmin: false }
         };
         setUsers(defaultUsers);
         await fetch('/api/save-users', {
@@ -132,8 +126,7 @@ export default function GymTracker() {
       const defaultUsers = {
         ethan: { username: 'Ethan', password: 'ethan123', isAdmin: true },
         biensy: { username: 'Biensy', password: 'biensy123', isAdmin: false },
-        brandon: { username: 'Brandon', password: 'brandon123', isAdmin: false },
-        chat: { username: 'Chat', password: 'gpt123', isAdmin: true }
+        brandon: { username: 'Brandon', password: 'brandon123', isAdmin: false }
       };
       setUsers(defaultUsers);
     } finally {
@@ -189,7 +182,34 @@ export default function GymTracker() {
     }
   };
 
-  const handleLogin = (e) => {
+  
+  const toInt = (v) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const toFloat = (v) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const calcVolume = (w) => {
+    const sets = toInt(w.sets);
+    const reps = toInt(w.reps);
+    const weight = toFloat(w.weight);
+    return Math.max(0, sets * reps * weight);
+  };
+
+  // Epley 1RM estimate: weight * (1 + reps/30)
+  const calcEstimated1RM = (w) => {
+    const reps = toInt(w.reps);
+    const weight = toFloat(w.weight);
+    if (weight <= 0 || reps <= 0) return 0;
+    return weight * (1 + reps / 30);
+  };
+
+
+const handleLogin = (e) => {
     e.preventDefault();
     const userKey = loginUsername.toLowerCase();
     const user = users[userKey];
@@ -198,7 +218,7 @@ export default function GymTracker() {
       setCurrentUser(user);
       setIsLoggedIn(true);
       setLoginError('');
-      setNewWorkout({ ...newWorkout, member: user.username, muscles: [] });
+      setNewWorkout({ ...newWorkout, member: user.username, customMuscles: [] });
       setNewGoal({ ...newGoal, member: user.username });
       setNewPhoto({ ...newPhoto, member: user.username });
     } else {
@@ -214,7 +234,131 @@ export default function GymTracker() {
     setView('dashboard');
   };
 
-  const handleChangePassword = async (e) => {
+
+  
+  const normalizeUserKey = (name) => (name || '').trim().toLowerCase();
+
+  const handleAdminAddUser = async () => {
+    setAdminNotice('');
+    const username = (adminAddUser.username || '').trim();
+    const password = (adminAddUser.password || '').trim();
+    const key = normalizeUserKey(username);
+
+    if (!username) {
+      setAdminNotice('Username is required.');
+      return;
+    }
+    if (!password || password.length < 6) {
+      setAdminNotice('Password must be at least 6 characters.');
+      return;
+    }
+    if (users[key]) {
+      setAdminNotice('That user already exists.');
+      return;
+    }
+
+    const updatedUsers = {
+      ...users,
+      [key]: { username, password, isAdmin: !!adminAddUser.isAdmin }
+    };
+
+    setUsers(updatedUsers);
+    await saveUsers(updatedUsers);
+
+    setAdminAddUser({ username: '', password: '', isAdmin: false });
+    setAdminNotice(`User "${username}" created.`);
+  };
+
+  const handleAdminResetPassword = async () => {
+    setAdminNotice('');
+    const userKey = adminReset.userKey;
+    const newPassword = (adminReset.newPassword || '').trim();
+
+    if (!userKey || !users[userKey]) {
+      setAdminNotice('Select a valid user to reset.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      setAdminNotice('New password must be at least 6 characters.');
+      return;
+    }
+
+    const updatedUsers = {
+      ...users,
+      [userKey]: { ...users[userKey], password: newPassword }
+    };
+
+    setUsers(updatedUsers);
+    await saveUsers(updatedUsers);
+
+    setAdminReset({ userKey: '', newPassword: '' });
+    setAdminNotice(`Password reset for "${updatedUsers[userKey].username}".`);
+  };
+
+  const handleAdminToggleAdmin = async (userKey) => {
+    setAdminNotice('');
+    if (!users[userKey]) return;
+
+    // Prevent removing admin from the last admin user
+    const admins = Object.keys(users).filter((k) => users[k].isAdmin);
+    const isRemovingLastAdmin = users[userKey].isAdmin && admins.length === 1;
+
+    if (isRemovingLastAdmin) {
+      setAdminNotice('You must have at least one admin.');
+      return;
+    }
+
+    const updatedUsers = {
+      ...users,
+      [userKey]: { ...users[userKey], isAdmin: !users[userKey].isAdmin }
+    };
+
+    setUsers(updatedUsers);
+    await saveUsers(updatedUsers);
+  };
+
+  const handleAdminRemoveUser = async (userKey) => {
+    setAdminNotice('');
+    if (!users[userKey]) return;
+
+    // Don’t let an admin delete themselves
+    const currentKey = normalizeUserKey(currentUser?.username);
+    if (userKey === currentKey) {
+      setAdminNotice("You can't remove your own account while logged in.");
+      return;
+    }
+
+    // Prevent deleting the last admin
+    const admins = Object.keys(users).filter((k) => users[k].isAdmin);
+    const isLastAdmin = users[userKey].isAdmin && admins.length === 1;
+    if (isLastAdmin) {
+      setAdminNotice('You must have at least one admin.');
+      return;
+    }
+
+    const updatedUsers = { ...users };
+    delete updatedUsers[userKey];
+
+    // Also remove this user's workouts/goals/photos (optional but keeps things tidy)
+    const removedUsername = users[userKey].username;
+    const updatedWorkouts = workouts.filter((w) => w.member !== removedUsername);
+    const updatedGoals = goals.filter((g) => g.member !== removedUsername);
+    const updatedPhotos = photos.filter((p) => p.member !== removedUsername);
+
+    setUsers(updatedUsers);
+    setWorkouts(updatedWorkouts);
+    setGoals(updatedGoals);
+    setPhotos(updatedPhotos);
+
+    await saveUsers(updatedUsers);
+    await saveWorkouts(updatedWorkouts);
+    await saveGoals(updatedGoals);
+    await savePhotos(updatedPhotos);
+
+    setAdminNotice(`Removed "${removedUsername}" and their data.`);
+  };
+
+const handleChangePassword = async (e) => {
     e.preventDefault();
     setPasswordError('');
     setPasswordSuccess('');
@@ -254,44 +398,32 @@ export default function GymTracker() {
   };
 
   const addWorkout = async () => {
-    const finalExercise = newWorkout.exercise === 'Other (Custom)'
-      ? newWorkout.customExercise
+    const finalExercise = newWorkout.exercise === 'Other (Custom)' 
+      ? newWorkout.customExercise 
       : newWorkout.exercise;
 
     if (finalExercise && newWorkout.sets && newWorkout.reps) {
-      const sets = parseInt(newWorkout.sets) || 0;
-      const reps = parseInt(newWorkout.reps) || 0;
-      const weight = parseFloat(newWorkout.weight) || 0;
-      const volume = sets * reps * weight;
-      const estimated1RM = weight * (1 + reps / 30);
-      // Determine which muscle groups this workout hits.
-      const muscles =
-        newWorkout.exercise === 'Other (Custom)' && newWorkout.muscles && newWorkout.muscles.length > 0
-          ? newWorkout.muscles
-          : (muscleGroups[finalExercise] || []);
-      const updatedWorkouts = [
-        ...workouts,
-        {
-          ...newWorkout,
-          exercise: finalExercise,
-          muscles,
-          volume,
-          estimated1RM,
-          id: Date.now(),
-        },
-      ];
+      const updatedWorkouts = [...workouts, { 
+        ...newWorkout, 
+        exercise: finalExercise,
+        // For custom exercises, allow the user to allocate muscle groups.
+        muscles: newWorkout.exercise === 'Other (Custom)' ? (newWorkout.customMuscles || []) : undefined,
+        volume: calcVolume({ ...newWorkout, exercise: finalExercise }),
+        estimated1RM: calcEstimated1RM({ ...newWorkout, exercise: finalExercise }),
+        id: Date.now() 
+      }];
       setWorkouts(updatedWorkouts);
       await saveWorkouts(updatedWorkouts);
-
+      
       setNewWorkout({
         member: currentUser.username,
         exercise: '',
         customExercise: '',
+        customMuscles: [],
         sets: '',
         reps: '',
         weight: '',
-        date: getLocalDateString(),
-        muscles: []
+        date: new Date().toISOString().split('T')[0]
       });
       setShowAddWorkout(false);
     }
@@ -335,7 +467,7 @@ export default function GymTracker() {
       setNewPhoto({
         photoData: '',
         description: '',
-        date: getLocalDateString(),
+        date: new Date().toISOString().split('T')[0],
         member: currentUser.username
       });
       setShowAddPhoto(false);
@@ -351,17 +483,6 @@ export default function GymTracker() {
       };
       reader.readAsDataURL(file);
     }
-  };
-
-  // Toggle a muscle group for custom exercises in newWorkout.
-  const toggleMuscle = (muscle) => {
-    setNewWorkout((prev) => {
-      const has = prev.muscles && prev.muscles.includes(muscle);
-      const muscles = has
-        ? prev.muscles.filter((m) => m !== muscle)
-        : [...(prev.muscles || []), muscle];
-      return { ...prev, muscles };
-    });
   };
 
   const deleteWorkout = async (id) => {
@@ -399,118 +520,21 @@ export default function GymTracker() {
     }
   };
 
-  // Admin: add a new user
-  const addUserAdmin = async () => {
-    setAdminMessage('');
-    const { username, password, isAdmin } = adminUserForm;
-    if (!username || !password) {
-      setAdminMessage('Username and password are required');
-      return;
-    }
-    const key = username.toLowerCase();
-    if (users[key]) {
-      setAdminMessage('User already exists');
-      return;
-    }
-    const newUsers = {
-      ...users,
-      [key]: { username: username, password: password, isAdmin: isAdmin }
-    };
-    setUsers(newUsers);
-    await saveUsers(newUsers);
-    setAdminMessage(`Added user ${username}`);
-    setAdminUserForm({ username: '', password: '', isAdmin: false });
-  };
-
-  // Admin: reset an existing user's password
-  const resetUserPasswordAdmin = async () => {
-    setAdminMessage('');
-    const { username, password } = resetUserForm;
-    if (!username || !password) {
-      setAdminMessage('Select a user and provide a new password');
-      return;
-    }
-    const key = username.toLowerCase();
-    if (!users[key]) {
-      setAdminMessage('User not found');
-      return;
-    }
-    const updatedUsers = {
-      ...users,
-      [key]: { ...users[key], password: password }
-    };
-    setUsers(updatedUsers);
-    await saveUsers(updatedUsers);
-    setAdminMessage(`Password reset for ${username}`);
-    setResetUserForm({ username: '', password: '' });
-  };
-
-  // Admin: toggle admin status for a user
-  const toggleUserAdmin = async (username) => {
-    setAdminMessage('');
-    const key = username.toLowerCase();
-    const adminCount = Object.values(users).filter(u => u.isAdmin).length;
-    if (users[key].isAdmin && adminCount <= 1) {
-      setAdminMessage('Cannot remove admin role from the last admin');
-      return;
-    }
-    const updatedUsers = {
-      ...users,
-      [key]: { ...users[key], isAdmin: !users[key].isAdmin }
-    };
-    setUsers(updatedUsers);
-    await saveUsers(updatedUsers);
-    setAdminMessage(`${username} is now ${updatedUsers[key].isAdmin ? 'an admin' : 'a regular user'}`);
-  };
-
-  // Admin: delete a user
-  const deleteUserAdmin = async (username) => {
-    setAdminMessage('');
-    const key = username.toLowerCase();
-    if (username === currentUser.username) {
-      setAdminMessage('You cannot delete yourself');
-      return;
-    }
-    const adminCount = Object.values(users).filter(u => u.isAdmin).length;
-    if (users[key].isAdmin && adminCount <= 1) {
-      setAdminMessage('Cannot delete the last admin');
-      return;
-    }
-    const updatedUsers = { ...users };
-    delete updatedUsers[key];
-    const updatedWorkouts = workouts.filter(w => w.member !== username);
-    const updatedGoals = goals.filter(g => g.member !== username);
-    const updatedPhotos = photos.filter(p => p.member !== username);
-    setUsers(updatedUsers);
-    setWorkouts(updatedWorkouts);
-    setGoals(updatedGoals);
-    setPhotos(updatedPhotos);
-    await saveUsers(updatedUsers);
-    await saveWorkouts(updatedWorkouts);
-    await saveGoals(updatedGoals);
-    await savePhotos(updatedPhotos);
-    setAdminMessage(`Removed user ${username}`);
-  };
-
   const getStats = () => {
-    // Calculate stats for the currently logged in user.
-    const myName = currentUser?.username || '';
-    const myWorkouts = workouts.filter((w) => w.member === myName);
-    const totalWorkouts = myWorkouts.length;
-    const totalSets = myWorkouts.reduce((sum, w) => sum + (parseInt(w.sets) || 0), 0);
-    const totalVolume = myWorkouts.reduce((sum, w) => {
-      const sets = parseInt(w.sets) || 0;
-      const reps = parseInt(w.reps) || 0;
-      const weight = parseFloat(w.weight) || 0;
-      return sum + sets * reps * weight;
-    }, 0);
-    // Build a summary of workouts per member for the leaderboard.
+    const members = Object.values(users).map(u => u.username);
+    const totalWorkouts = workouts.length;
+    const totalSets = workouts.reduce((sum, w) => sum + toInt(w.sets), 0);
+    const totalVolume = workouts.reduce((sum, w) => sum + calcVolume(w), 0);
+
     const memberWorkouts = {};
-    Object.values(users).forEach((u) => {
-      const uname = u.username;
-      memberWorkouts[uname] = workouts.filter((w) => w.member === uname).length;
+    const memberVolume = {};
+    members.forEach(m => {
+      const ws = workouts.filter(w => w.member === m);
+      memberWorkouts[m] = ws.length;
+      memberVolume[m] = ws.reduce((sum, w) => sum + calcVolume(w), 0);
     });
-    return { totalWorkouts, totalSets, totalVolume, memberWorkouts };
+
+    return { totalWorkouts, totalSets, totalVolume, memberWorkouts, memberVolume, members };
   };
 
   const getPersonalStats = () => {
@@ -521,34 +545,31 @@ export default function GymTracker() {
       if (!exerciseStats[w.exercise]) {
         exerciseStats[w.exercise] = [];
       }
-      exerciseStats[w.exercise].push({
-        weight: parseFloat(w.weight) || 0,
+      const session = {
+        weight: toFloat(w.weight),
         date: w.date,
-        sets: parseInt(w.sets) || 0,
-        reps: parseInt(w.reps) || 0
-      });
+        sets: toInt(w.sets),
+        reps: toInt(w.reps),
+        volume: calcVolume(w),
+        estimated1RM: w.estimated1RM ? toFloat(w.estimated1RM) : calcEstimated1RM(w)
+      };
+      exerciseStats[w.exercise].push(session);
     });
 
     const stats = Object.keys(exerciseStats).map(exercise => {
       const sessions = exerciseStats[exercise].sort((a, b) => new Date(a.date) - new Date(b.date));
-      const maxWeight = Math.max(...sessions.map((s) => s.weight), 0);
+      const maxWeight = Math.max(...sessions.map(s => s.weight));
       const firstWeight = sessions[0]?.weight || 0;
       const lastWeight = sessions[sessions.length - 1]?.weight || 0;
       const improvement = firstWeight > 0 ? ((lastWeight - firstWeight) / firstWeight * 100) : 0;
-      // Compute volume and estimated 1RM for each session.
-      const volumes = sessions.map((s) => (s.sets * s.reps * s.weight));
-      const maxVolume = volumes.length ? Math.max(...volumes) : 0;
-      const oneRMs = sessions.map((s) => s.weight * (1 + s.reps / 30));
-      const max1RM = oneRMs.length ? Math.max(...oneRMs) : 0;
+      
       return {
         exercise,
         personalRecord: maxWeight,
         sessions: sessions.length,
         improvement: improvement.toFixed(1),
         lastWeight: lastWeight,
-        trend: lastWeight > firstWeight ? 'up' : lastWeight < firstWeight ? 'down' : 'stable',
-        maxVolume: maxVolume.toFixed(1),
-        max1RM: max1RM.toFixed(1)
+        trend: lastWeight > firstWeight ? 'up' : lastWeight < firstWeight ? 'down' : 'stable'
       };
     }).sort((a, b) => b.sessions - a.sessions);
 
@@ -572,12 +593,9 @@ export default function GymTracker() {
       'Glutes': 0
     };
 
-    recentWorkouts.forEach((w) => {
-      // Use explicitly selected muscles for custom exercises if available, otherwise fall back to predefined mapping.
-      const groups = (w.muscles && w.muscles.length > 0)
-        ? w.muscles
-        : (muscleGroups[w.exercise] || []);
-      groups.forEach((group) => {
+    recentWorkouts.forEach(w => {
+      const groups = (w.muscles && w.muscles.length > 0) ? w.muscles : (muscleGroups[w.exercise] || []);
+      groups.forEach(group => {
         muscleGroupCount[group] = (muscleGroupCount[group] || 0) + parseInt(w.sets || 0);
       });
     });
@@ -625,8 +643,7 @@ export default function GymTracker() {
 
   const stats = getStats();
   const recentWorkouts = [...workouts].reverse().slice(0, 10);
-  // Build member list dynamically from the users object for leaderboards and admin actions.
-  const members = Object.values(users).map((u) => u.username);
+  const members = stats.members || Object.values(users).map(u => u.username);
   const personalStats = isLoggedIn ? getPersonalStats() : [];
   const muscleHeatmap = isLoggedIn ? getMuscleGroupHeatmap() : [];
   const myGoals = isLoggedIn ? getMyGoals() : [];
@@ -794,7 +811,6 @@ export default function GymTracker() {
             <Users className="w-5 h-5" />
             The Crew
           </button>
-
           {currentUser.isAdmin && (
             <button
               onClick={() => setView('admin')}
@@ -812,7 +828,7 @@ export default function GymTracker() {
 
     {view === 'dashboard' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="bg-gradient-to-br from-purple-600/20 to-purple-800/20 backdrop-blur-md border border-purple-500/30 rounded-xl p-6">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-purple-300 font-semibold">Total Workouts</h3>
@@ -827,13 +843,21 @@ export default function GymTracker() {
                 </div>
                 <p className="text-4xl font-bold">{stats.totalSets}</p>
               </div>
-              <div className="bg-gradient-to-br from-blue-600/20 to-blue-800/20 backdrop-blur-md border border-blue-500/30 rounded-xl p-6">
+              
+              <div className="bg-gradient-to-br from-emerald-600/20 to-emerald-800/20 backdrop-blur-md border border-emerald-500/30 rounded-xl p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-blue-300 font-semibold">Total Volume</h3>
-                  <BarChart3 className="w-6 h-6 text-blue-400" />
+                  <h3 className="text-emerald-300 font-semibold">Total Volume</h3>
+                  <BarChart3 className="w-6 h-6 text-emerald-400" />
                 </div>
-                <p className="text-4xl font-bold">{stats.totalVolume}</p>
-                <p className="text-xs text-gray-400">kg (sets×reps×weight)</p>
+                <p className="text-4xl font-bold">{Math.round(stats.totalVolume)}</p>
+                <p className="text-xs text-gray-400 mt-1">kg (sets×reps×weight)</p>
+              </div>
+<div className="bg-gradient-to-br from-blue-600/20 to-blue-800/20 backdrop-blur-md border border-blue-500/30 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-blue-300 font-semibold">Your Workouts</h3>
+                  <Users className="w-6 h-6 text-blue-400" />
+                </div>
+                <p className="text-4xl font-bold">{stats.memberWorkouts[currentUser.username] || 0}</p>
               </div>
             </div>
 
@@ -925,12 +949,14 @@ export default function GymTracker() {
                           <p className="text-sm text-gray-400">{stat.sessions} sessions logged</p>
                         </div>
                         <div className="text-right">
-                          <div className="text-2xl font-bold text-pink-400">{stat.personalRecord}kg</div>
+                          <div className="text-2xl font-bold text-pink-400">{stat.personalRecordWeight}kg</div>
                           <p className="text-xs text-gray-400">Personal Record</p>
+                          <div className="text-xs text-gray-400 mt-1">Est. 1RM PR: <span className="text-purple-300 font-semibold">{Math.round(stat.personalRecord1RM)}kg</span></div>
+                          <div className="text-xs text-gray-400">Max Session Volume: <span className="text-blue-300 font-semibold">{Math.round(stat.personalRecordVolume)}kg</span></div>
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-white/10">
+                      <div className="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/10">
                         <div>
                           <p className="text-xs text-gray-400 mb-1">Current Weight</p>
                           <p className="text-lg font-semibold text-blue-300">{stat.lastWeight}kg</p>
@@ -938,20 +964,12 @@ export default function GymTracker() {
                         <div>
                           <p className="text-xs text-gray-400 mb-1">Improvement</p>
                           <p className={`text-lg font-semibold ${
-                            stat.trend === 'up' ? 'text-green-400' :
-                            stat.trend === 'down' ? 'text-red-400' :
+                            stat.trend === 'up' ? 'text-green-400' : 
+                            stat.trend === 'down' ? 'text-red-400' : 
                             'text-gray-400'
                           }`}>
                             {stat.trend === 'up' ? '↑' : stat.trend === 'down' ? '↓' : '→'} {stat.improvement}%
                           </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-400 mb-1">Volume PR</p>
-                          <p className="text-lg font-semibold text-emerald-300">{stat.maxVolume}kg</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-400 mb-1">Estimated 1RM</p>
-                          <p className="text-lg font-semibold text-yellow-300">{stat.max1RM}kg</p>
                         </div>
                       </div>
                     </div>
@@ -1143,7 +1161,7 @@ export default function GymTracker() {
                       <div>
                         <h3 className="font-bold text-lg flex items-center gap-2">
                           {data.member}
-                          {data.member === 'Ethan' && (
+                          {(Object.values(users).find(u => u.username === data.member)?.isAdmin) && (
                             <span className="flex items-center gap-1 bg-purple-600/30 px-2 py-0.5 rounded-full text-xs">
                               <Shield className="w-3 h-3" />
                               Admin
@@ -1164,134 +1182,123 @@ export default function GymTracker() {
             </div>
           </div>
         )}
-        {view === 'admin' && currentUser.isAdmin && (
+
+  {view === 'admin' && currentUser.isAdmin && (
           <div className="space-y-6">
             <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-xl p-6">
-              <h2 className="text-2xl font-bold mb-6 flex items-center gap-2">
+              <h2 className="text-2xl font-bold mb-4 flex items-center gap-2">
                 <Shield className="w-6 h-6 text-purple-400" />
-                User Management
+                Admin – User Management
               </h2>
-              {adminMessage && (
-                <div
-                  className={`mb-4 px-4 py-3 rounded-lg ${
-                    adminMessage.toLowerCase().includes('error')
-                      ? 'bg-red-500/20 border border-red-500/50 text-red-300'
-                      : 'bg-green-500/20 border border-green-500/50 text-green-300'
-                  }`}
-                >
-                  {adminMessage}
-                </div>
-              )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Add User Form */}
-                <div className="space-y-4">
-                  <h3 className="text-xl font-semibold">Add User</h3>
-                  <div>
-                    <label className="block text-sm font-semibold mb-2 text-gray-300">Username</label>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-black/30 border border-white/10 rounded-lg p-5">
+                  <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+                    <UserPlus className="w-5 h-5 text-green-400" />
+                    Add User
+                  </h3>
+                  <div className="space-y-3">
                     <input
                       type="text"
-                      value={adminUserForm.username}
-                      onChange={(e) => setAdminUserForm({ ...adminUserForm, username: e.target.value })}
+                      value={adminAddUser.username}
+                      onChange={(e) => setAdminAddUser({ ...adminAddUser, username: e.target.value })}
                       className="w-full bg-black/30 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
-                      placeholder="Username"
+                      placeholder="Username (e.g., Cameron)"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold mb-2 text-gray-300">Password</label>
                     <input
                       type="password"
-                      value={adminUserForm.password}
-                      onChange={(e) => setAdminUserForm({ ...adminUserForm, password: e.target.value })}
+                      value={adminAddUser.password}
+                      onChange={(e) => setAdminAddUser({ ...adminAddUser, password: e.target.value })}
                       className="w-full bg-black/30 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
-                      placeholder="Password"
+                      placeholder="Temp password"
                     />
+                    <label className="flex items-center gap-2 text-sm text-gray-300">
+                      <input
+                        type="checkbox"
+                        checked={adminAddUser.isAdmin}
+                        onChange={(e) => setAdminAddUser({ ...adminAddUser, isAdmin: e.target.checked })}
+                      />
+                      Make admin
+                    </label>
+                    <button
+                      onClick={handleAdminAddUser}
+                      className="w-full bg-gradient-to-r from-green-600 to-emerald-600 py-2 rounded-lg font-bold hover:from-green-500 hover:to-emerald-500 transition-all"
+                    >
+                      Create User
+                    </button>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      id="isAdmin"
-                      type="checkbox"
-                      checked={adminUserForm.isAdmin}
-                      onChange={(e) => setAdminUserForm({ ...adminUserForm, isAdmin: e.target.checked })}
-                      className="form-checkbox h-4 w-4 text-purple-600"
-                    />
-                    <label htmlFor="isAdmin" className="text-sm">Admin</label>
-                  </div>
-                  <button
-                    onClick={addUserAdmin}
-                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 py-2 rounded-lg font-bold hover:from-purple-500 hover:to-pink-500 transition-all shadow-lg shadow-purple-500/50"
-                  >
-                    Add User
-                  </button>
                 </div>
-                {/* Reset Password Form */}
-                <div className="space-y-4">
-                  <h3 className="text-xl font-semibold">Reset Password</h3>
-                  <div>
-                    <label className="block text-sm font-semibold mb-2 text-gray-300">Select User</label>
+
+                <div className="bg-black/30 border border-white/10 rounded-lg p-5">
+                  <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+                    <RefreshCw className="w-5 h-5 text-blue-400" />
+                    Reset Password
+                  </h3>
+                  <div className="space-y-3">
                     <select
-                      value={resetUserForm.username}
-                      onChange={(e) => setResetUserForm({ ...resetUserForm, username: e.target.value })}
+                      value={adminReset.userKey}
+                      onChange={(e) => setAdminReset({ ...adminReset, userKey: e.target.value })}
                       className="w-full bg-black/30 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
                     >
-                      <option value="">Choose user</option>
-                      {Object.values(users).map((u) => (
-                        <option key={u.username} value={u.username}>{u.username}</option>
+                      <option value="">Select user</option>
+                      {Object.keys(users).map((k) => (
+                        <option key={k} value={k}>{users[k].username}</option>
                       ))}
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold mb-2 text-gray-300">New Password</label>
                     <input
-                      type="password"
-                      value={resetUserForm.password}
-                      onChange={(e) => setResetUserForm({ ...resetUserForm, password: e.target.value })}
+                      type="text"
+                      value={adminReset.newPassword}
+                      onChange={(e) => setAdminReset({ ...adminReset, newPassword: e.target.value })}
                       className="w-full bg-black/30 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
                       placeholder="New password"
                     />
+                    <button
+                      onClick={handleAdminResetPassword}
+                      className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 py-2 rounded-lg font-bold hover:from-blue-500 hover:to-cyan-500 transition-all"
+                    >
+                      Reset Password
+                    </button>
                   </div>
-                  <button
-                    onClick={resetUserPasswordAdmin}
-                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 py-2 rounded-lg font-bold hover:from-purple-500 hover:to-pink-500 transition-all shadow-lg shadow-purple-500/50"
-                  >
-                    Reset Password
-                  </button>
                 </div>
               </div>
-              {/* User List for toggling admin and removal */}
-              <div className="mt-8">
-                <h3 className="text-xl font-semibold mb-4">Manage Users</h3>
-                <div className="space-y-2">
-                  {Object.values(users).map((u) => (
-                    <div key={u.username} className="flex items-center justify-between bg-black/30 border border-white/10 rounded-lg p-3">
-                      <div className="flex items-center gap-3">
-                        <span className="font-semibold">{u.username}</span>
-                        {u.isAdmin && (
-                          <span className="flex items-center gap-1 bg-purple-600/30 px-2 py-0.5 rounded-full text-xs">
-                            <Shield className="w-3 h-3" /> Admin
-                          </span>
-                        )}
+
+              <div className="bg-black/30 border border-white/10 rounded-lg p-5 mt-6">
+                <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-purple-300" />
+                  Users
+                </h3>
+                <div className="space-y-3">
+                  {Object.keys(users).map((k) => (
+                    <div key={k} className="flex items-center justify-between bg-black/20 border border-white/10 rounded-lg p-3">
+                      <div>
+                        <div className="font-semibold">{users[k].username}</div>
+                        <div className="text-xs text-gray-400">{k}</div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {u.username !== currentUser.username && (
-                          <>
-                            <button
-                              onClick={() => toggleUserAdmin(u.username)}
-                              className="px-3 py-1 bg-white/10 border border-white/20 rounded-lg text-xs hover:bg-white/20 transition-all"
-                            >
-                              {u.isAdmin ? 'Revoke Admin' : 'Make Admin'}
-                            </button>
-                            <button
-                              onClick={() => deleteUserAdmin(u.username)}
-                              className="px-3 py-1 bg-red-600/20 border border-red-500/30 rounded-lg text-xs hover:bg-red-600/30 transition-all"
-                            >
-                              Remove
-                            </button>
-                          </>
-                        )}
+                      <div className="flex items-center gap-3">
+                        <label className="text-sm text-gray-300 flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={!!users[k].isAdmin}
+                            onChange={() => handleAdminToggleAdmin(k)}
+                          />
+                          Admin
+                        </label>
+                        <button
+                          onClick={() => handleAdminRemoveUser(k)}
+                          className="flex items-center gap-2 px-3 py-2 bg-red-600/20 border border-red-500/30 rounded-lg hover:bg-red-600/30 transition-all text-sm"
+                        >
+                          <UserMinus className="w-4 h-4" />
+                          Remove
+                        </button>
                       </div>
                     </div>
                   ))}
                 </div>
+                {adminNotice && (
+                  <div className="mt-4 bg-white/10 border border-white/20 rounded-lg px-4 py-3 text-sm text-gray-200">
+                    {adminNotice}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1299,6 +1306,37 @@ export default function GymTracker() {
       </div>
 
       {/* ✅ MODALS MUST LIVE INSIDE THIS ROOT RETURN */}
+      {showChangePassword && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-purple-500/30 rounded-xl p-6 max-w-md w-full shadow-2xl">
+            {/* ... unchanged modal content ... */}
+          </div>
+        </div>
+      )}
+
+      {showAddWorkout && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-purple-500/30 rounded-xl p-6 max-w-md w-full shadow-2xl">
+            {/* ... unchanged modal content ... */}
+          </div>
+        </div>
+      )}
+
+      {showAddGoal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-green-500/30 rounded-xl p-6 max-w-md w-full shadow-2xl">
+            {/* ... unchanged modal content ... */}
+          </div>
+        </div>
+      )}
+
+      {showAddPhoto && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-blue-500/30 rounded-xl p-6 max-w-md w-full shadow-2xl">
+            {/* ... unchanged modal content ... */}
+          </div>
+        </div>
+      )}
 
   {showChangePassword && (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -1419,38 +1457,20 @@ export default function GymTracker() {
           </div>
           
           {newWorkout.exercise === 'Other (Custom)' && (
-            <>
-              <div>
-                <label className="block text-sm font-semibold mb-2 text-gray-300">Custom Exercise Name</label>
-                <input
-                  type="text"
-                  value={newWorkout.customExercise}
-                  onChange={(e) => setNewWorkout({ ...newWorkout, customExercise: e.target.value })}
-                  className="w-full bg-black/30 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
-                  placeholder="Enter exercise name"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold mb-2 text-gray-300">Target Muscle Groups</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {availableMuscleGroups.map((group) => (
-                    <label key={group} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={newWorkout.muscles && newWorkout.muscles.includes(group)}
-                        onChange={() => toggleMuscle(group)}
-                        className="form-checkbox h-4 w-4 text-purple-600"
-                      />
-                      <span>{group}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-gray-400 mt-1">These selections map custom exercises to muscle groups for the heatmap.</p>
-              </div>
-            </>
+            <div>
+              <label className="block text-sm font-semibold mb-2 text-gray-300">Custom Exercise Name</label>
+              <input
+                type="text"
+                value={newWorkout.customExercise}
+                onChange={(e) => setNewWorkout({ ...newWorkout, customExercise: e.target.value })}
+                className="w-full bg-black/30 border border-white/20 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+                placeholder="Enter exercise name"
+                required
+              />
+            </div>
           )}
 
+          
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-semibold mb-2 text-gray-300">Sets</label>
@@ -1462,6 +1482,36 @@ export default function GymTracker() {
                 placeholder="3"
               />
             </div>
+
+          {newWorkout.exercise === 'Other (Custom)' && (
+            <div className="bg-black/20 border border-white/10 rounded-lg p-4">
+              <label className="block text-sm font-semibold mb-3 text-gray-300">
+                Target Muscle Groups (for heatmap)
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {muscleGroupOptions.map((group) => (
+                  <label key={group} className="flex items-center gap-2 text-sm text-gray-200">
+                    <input
+                      type="checkbox"
+                      checked={(newWorkout.customMuscles || []).includes(group)}
+                      onChange={(e) => {
+                        const selected = newWorkout.customMuscles || [];
+                        const next = e.target.checked
+                          ? [...selected, group]
+                          : selected.filter((g) => g !== group);
+                        setNewWorkout({ ...newWorkout, customMuscles: next });
+                      }}
+                    />
+                    {group}
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-3">
+                These are only used for the heatmap. Your exercise name stays whatever you type above.
+              </p>
+            </div>
+          )}
+
             <div>
               <label className="block text-sm font-semibold mb-2 text-gray-300">Reps</label>
               <input
